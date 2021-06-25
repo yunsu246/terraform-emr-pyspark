@@ -15,9 +15,8 @@ resource "aws_emr_cluster" "emr-spark-cluster" {
 
   ebs_root_volume_size = "12"
 
-  instance_group {
+  master_instance_group {
     name           = "EMR master"
-    instance_role  = "MASTER"
     instance_type  = "${var.master_instance_type}"
     instance_count = "1"
 
@@ -28,9 +27,8 @@ resource "aws_emr_cluster" "emr-spark-cluster" {
     }
   }
 
-  instance_group {
+  core_instance_group {
     name           = "EMR slave"
-    instance_role  = "CORE"
     instance_type  = "${var.core_instance_type}"
     instance_count = "${var.core_instance_count}"
 
@@ -41,7 +39,7 @@ resource "aws_emr_cluster" "emr-spark-cluster" {
     }
   }
 
-  tags {
+  tags = {
     Name = "${var.name} - Spark cluster"
   }
 
@@ -53,35 +51,59 @@ resource "aws_emr_cluster" "emr-spark-cluster" {
     path = "s3://${var.name}/scripts/bootstrap_actions.sh"
   }
 
-  step = [
-    {
-      name              = "Copy script file from s3."
-      action_on_failure = "CONTINUE"
+  step {
+    name              = "Copy setup script file from s3."
+    action_on_failure = "CONTINUE"
 
-      hadoop_jar_step {
-        jar  = "command-runner.jar"
-        args = ["aws", "s3", "cp", "s3://${var.name}/scripts/pyspark_quick_setup.sh", "/home/hadoop/"]
-      }
-    },
-    {
-      name              = "Setup pyspark with conda."
-      action_on_failure = "CONTINUE"
+    hadoop_jar_step {
+      jar  = "command-runner.jar"
+      args = ["aws", "s3", "cp", "s3://spark-app/scripts/pyspark_quick_setup.sh", "/home/hadoop/"]
+    }
+  }
 
-      hadoop_jar_step {
-        jar  = "command-runner.jar"
-        args = ["sudo", "bash", "/home/hadoop/pyspark_quick_setup.sh"]
-      }
-    },
-  ]
+  step {
+    name              = "Copy jupyter notebook scripts from s3."
+    action_on_failure = "CONTINUE"
+
+    hadoop_jar_step {
+      jar  = "command-runner.jar"
+      args = ["aws", "s3", "cp", "s3://spark-app/scripts/jupyter/notebook/", "/home/hadoop/jupyter/notebook/", "--recursive"]
+    }
+  }
+
+  step {
+    name              = "Copy jupyter notebook config file from s3"
+    action_on_failure = "CONTINUE"
+
+    hadoop_jar_step {
+      jar  = "command-runner.jar"
+      args = ["aws", "s3", "cp", "s3://spark-app/scripts/jupyter/config/", "/home/hadoop/.jupyter/", "--recursive"]
+    }
+  }
+
+  step {
+    name              = "Setup pyspark with conda."
+    action_on_failure = "CONTINUE"
+
+    hadoop_jar_step {
+      jar  = "command-runner.jar"
+      args = ["sudo", "bash", "/home/hadoop/pyspark_quick_setup.sh"]
+    }
+  }
 
   configurations_json = <<EOF
     [
     {
-    "Classification": "spark-defaults",
-      "Properties": {
-      "maximizeResourceAllocation": "true",
-      "spark.dynamicAllocation.enabled": "true"
-      }
+      "Classification": "spark-env",
+      "Configurations": [
+        {
+          "Classification": "export",
+          "Properties": {
+              "PYSPARK_PYTHON": "/home/hadoop/conda/bin/python",
+              "PYSPARK_DRIVER_PYTHON": "/home/hadoop/conda/bin/python"
+            }
+        }
+      ]
     }
   ]
   EOF
